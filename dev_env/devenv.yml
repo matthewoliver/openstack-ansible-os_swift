@@ -288,7 +288,7 @@
     delegate_to: "{{ physical_host }}"
   - name: Clone swift repository on host
     git:
-      repo: "https://git.openstack.org/openstack/swift"
+      repo: "{{ swift_repo }}"
       dest: "/srv/swift"
       update: yes
       clone: yes
@@ -316,6 +316,7 @@
         - "lxc.mount.entry=/srv/swift /opt/swift none bind 0 0"
         - "lxc.mount.entry=/srv/python-swiftclient /opt/python-swiftclient none bind 0 0"
         - "lxc.mount.entry=/srv/logs/{{ container_name }} /var/log/swift none bind 0 0"
+        - "lxc.mount.entry=/srv/etc/{{ container_name }} /etc/swift none bind 0 0"
     delegate_to: "{{ physical_host }}"
   - name: Wait for ssh to be available
     local_action:
@@ -325,6 +326,7 @@
       search_regex: OpenSSH
       delay: 1
   vars:
+    swift_repo: "https://git.openstack.org/openstack/swift"
     swift_branch: master
     swiftclient_branch: master
     sparse_loopback_size: '1024G'
@@ -350,6 +352,18 @@
             index: 0
             repl_number: 3
             default: True
+        - policy:
+            name: silver
+            index: 1
+            policy_type: replication
+        - policy:
+            name: ec42
+            index: 2
+            policy_type: erasure_coding
+            ec_type: jerasure_rs_vand
+            ec_num_data_fragments: 4
+            ec_num_parity_fragments: 2
+            ec_object_segment_size: 1048576
     swift_proxy_server_conf_overrides:
       "filter:keystoneauth":
         reseller_prefix: "AUTH, SERVICE"
@@ -378,6 +392,10 @@
     openrc_os_domain_name: "Default"
     openrc_os_auth_url: "http://10.100.100.2:5000/v3"
     memcached_encryption_key: "secrete"
+    swift_proxy_program_names: ''
+    swift_object_program_names: ''
+    swift_container_program_names: ''
+    swift_account_program_names: ''
     debug: true
     verbose: true
 
@@ -485,7 +503,7 @@
     debug: true
     verbose: true
 
-- name: Setup testing - 
+- name: Make sure swift deps and self is installed from the requested repo 
   hosts: swift_all
   user: root
   gather_facts: true
@@ -502,6 +520,39 @@
     with_items:
       - '/opt/swift'
       - '/opt/python-swiftclient'
+
+ - name: Make rings
+   hosts: local
+   user: root
+   gather_facts: true
+   tasks:
+   - name: Make dev bin folder
+     file: 
+       state: directory
+       path: '/srv/bin/' 
+   - name: Create remakerings file
+     template:
+       src: remakerings.j2
+       dest: /srv/bin/remakerings
+       mode: 770
+   - name: Make rings
+     shell: './remakerings'
+       chdir: '/srv/bin/'  
+   - name: Update bashrc
+     shell: 'echo "PATH=\"\$PATH:/srv/bin/\"" > ~/.bashrc'
+
+ - name: Start the cluster
+   hosts: swift_all
+   user: root
+   gather_facts: true
+   tasks:
+   - name: copy rings
+     copy:
+       src: '/etc/swift/*'
+       dest: '/srv/swift/{{ container_name }}'
+     delegate_to: "{{ physical_host }}"
+   - name: Make sure the swift cluster is running
+     shell: 'swift-init start all'
   - name: Setup test.conf for testing
     template:
       src: "swift_test.conf.j2"
