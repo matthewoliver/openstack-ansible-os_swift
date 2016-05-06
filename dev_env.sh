@@ -33,12 +33,12 @@ pip install tox
 
 # run the dev_env setup
 tox -e dev_setup
-for tox_env in $(awk -F= '/envlist/ {print $2}' tox.ini | sed 's/,/ /g'); do
-  if [ "${tox_env}" != "functional" ]; then
-    tox -e ${tox_env}
-  elif [ "${tox_env}" == "functional" ]; then
-    if ${FUNCTIONAL_TEST}; then
-      tox -e ${tox_env}
-    fi
-  fi
-done
+#for tox_env in $(awk -F= '/envlist/ {print $2}' tox.ini | sed 's/,/ /g'); do
+#  if [ "${tox_env}" != "functional" ]; then
+#    tox -e ${tox_env}
+#  elif [ "${tox_env}" == "functional" ]; then
+#    if ${FUNCTIONAL_TEST}; then
+#      tox -e ${tox_env}
+#    fi
+#  fi
+#done

@@ -236,7 +236,7 @@
     galera_client_drop_config_file: false
 
 - name: Swift setup
-  hosts: swift_hosts
+  hosts: swift_all
   user: root
   gather_facts: true
   pre_tasks:
@@ -244,6 +244,7 @@
     apt:
       name: xfsprogs
       state: present
+    when: "'swift_hosts' in group_names"
   - name: Openstack directory Create
     file:
       state: directory
@@ -251,6 +252,7 @@
     with_items:
       - 'swift1'
       - 'swift2'
+    when: "'swift_hosts' in group_names"
   - name: Create sparse Swift files
     shell: "truncate -s {{ sparse_loopback_size }} /opt/{{container_name}}_{{ item }}.img"
     args:
@@ -260,6 +262,7 @@
       - 'swift2'
     register: swift_create
     delegate_to: "{{ physical_host }}"
+    when: "'swift_hosts' in group_names"
   - name: Format the Swift files
     filesystem:
       fstype: xfs
@@ -269,6 +272,7 @@
       - 'swift1'
       - 'swift2'
     delegate_to: "{{ physical_host }}"
+    when: "'swift_hosts' in group_names"
   - name: Create the Swift fstab entries and mount the file systems
     mount:
       name: "/srv/{{ container_name }}_{{ item }}"
@@ -286,6 +290,7 @@
     retries: 5
     delay: 2
     delegate_to: "{{ physical_host }}"
+    when: "'swift_hosts' in group_names"
   - name: Clone swift repository on host
     git:
       repo: "{{ swift_repo }}"
@@ -307,7 +312,7 @@
       clone: yes
       version: "{{ swiftclient_branch }}"
     delegate_to: "{{ physical_host }}"
-  - name: Swift extra lxc config
+  - name: Swift extra lxc config - storage nodes
     lxc_container:
       name: "{{ container_name }}"
       container_config:
@@ -318,6 +323,17 @@
         - "lxc.mount.entry=/srv/logs/{{ container_name }} /var/log/swift none bind 0 0"
         - "lxc.mount.entry=/srv/etc/{{ container_name }} /etc/swift none bind 0 0"
     delegate_to: "{{ physical_host }}"
+    when: "'swift_hosts' in group_names"
+  - name: Swift extra lxc config - proxy
+    lxc_container:
+      name: "{{ container_name }}"
+      container_config:
+        - "lxc.mount.entry=/srv/swift /opt/swift none bind 0 0"
+        - "lxc.mount.entry=/srv/python-swiftclient /opt/python-swiftclient none bind 0 0"
+        - "lxc.mount.entry=/srv/logs/{{ container_name }} /var/log/swift none bind 0 0"
+        - "lxc.mount.entry=/srv/etc/{{ container_name }} /etc/swift none bind 0 0"
+    delegate_to: "{{ physical_host }}"
+    when: "'swift_hosts' not in group_names"
   - name: Wait for ssh to be available
     local_action:
       module: wait_for
@@ -507,6 +523,7 @@
   hosts: swift_all
   user: root
   gather_facts: true
+  tasks:
   - name: Install requirements for swift
     pip:
       requirements: "{{ item }}"
@@ -521,38 +538,39 @@
       - '/opt/swift'
       - '/opt/python-swiftclient'
 
- - name: Make rings
-   hosts: local
-   user: root
-   gather_facts: true
-   tasks:
-   - name: Make dev bin folder
-     file: 
-       state: directory
-       path: '/srv/bin/' 
-   - name: Create remakerings file
-     template:
-       src: remakerings.j2
-       dest: /srv/bin/remakerings
-       mode: 770
-   - name: Make rings
-     shell: './remakerings'
-       chdir: '/srv/bin/'  
-   - name: Update bashrc
-     shell: 'echo "PATH=\"\$PATH:/srv/bin/\"" > ~/.bashrc'
+- name: Make rings
+  hosts: local
+  user: root
+  gather_facts: true
+  tasks:
+  - name: Make dev bin folder
+    file: 
+      state: directory
+      path: '/srv/bin/' 
+  - name: Create remakerings file
+    template:
+      src: remakerings.j2
+      dest: /srv/bin/remakerings
+      mode: 770
+  - name: Make rings
+    shell: './remakerings'
+    args:
+      chdir: '/srv/bin/'  
+  - name: Update bashrc
+    shell: 'echo "PATH=\"\$PATH:/srv/bin/\"" > ~/.bashrc'
 
- - name: Start the cluster
-   hosts: swift_all
-   user: root
-   gather_facts: true
-   tasks:
-   - name: copy rings
-     copy:
-       src: '/etc/swift/*'
-       dest: '/srv/swift/{{ container_name }}'
-     delegate_to: "{{ physical_host }}"
-   - name: Make sure the swift cluster is running
-     shell: 'swift-init start all'
+- name: Start the cluster
+  hosts: swift_all
+  user: root
+  gather_facts: true
+  tasks:
+  - name: copy rings
+    copy:
+      src: '/etc/swift/*'
+      dest: '/srv/swift/{{ container_name }}'
+    delegate_to: "{{ physical_host }}"
+  - name: Make sure the swift cluster is running
+    shell: 'swift-init start all'
   - name: Setup test.conf for testing
     template:
       src: "swift_test.conf.j2"
